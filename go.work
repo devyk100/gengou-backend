@@ -1,0 +1,6 @@
+go 1.22.6
+
+use (
+	./gengou-db
+	./gengou-main-backend
+)
