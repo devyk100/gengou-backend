@@ -22,16 +22,6 @@ const (
 
 func AuthenticateUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		//var body AuthenticationBody
-		//err := json.NewDecoder(r.Body).Decode(&body)
-		//if err != nil {
-		//	fmt.Println(err.Error())
-		//}
-		//fmt.Println(body.Token)
-		//fmt.Println(r.Header)
-		//fmt.Println(r.Host)
-		//fmt.Println(r.URL)
-		//fmt.Println(r.Body)
 
 		now := time.Now()
 
@@ -44,7 +34,7 @@ func AuthenticateUser(next http.Handler) http.Handler {
 			return secretKey, nil
 		})
 		if err != nil {
-			log.Fatalf("Failed to parse token: %v", err)
+			log.Fatalf("Failed to parse token: %v %v %v", err, tokenString, err.Error())
 		}
 
 		var userId string

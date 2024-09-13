@@ -291,6 +291,17 @@ type CourseToLearnerMapping struct {
 	CourseGradedMarks int32
 }
 
+type DailyCardReview struct {
+	ID                int32
+	CardID            int32
+	DeckID            int32
+	ReviewID          int32
+	OldLearningStepNo int32
+	OldIsNew          bool
+	IsReviewComplete  bool
+	OldDueDate        int64
+}
+
 type ExternalContentItem struct {
 	ID     int32
 	Title  string
@@ -323,18 +334,19 @@ type FillWholeSentenceSolution struct {
 }
 
 type Flashcard struct {
-	ID                    int32
-	FrontSide             string
-	RearSide              string
-	FrontAudio            pgtype.Text
-	RearAudio             pgtype.Text
-	FrontImage            pgtype.Text
-	RearImage             pgtype.Text
-	ReviewFactor          int32
-	ReviewInterval        int32
-	DueDate               pgtype.Timestamp
-	UnreviewedPriorityNum int32
-	DeckID                int32
+	ID             int32
+	FrontSide      string
+	RearSide       string
+	FrontAudio     pgtype.Text
+	RearAudio      pgtype.Text
+	FrontImage     pgtype.Text
+	RearImage      pgtype.Text
+	ReviewFactor   int32
+	ReviewInterval int32
+	DueDate        int64
+	IsNew          bool
+	DeckID         int32
+	LearningStepNo int32
 }
 
 type FlashcardDeck struct {
@@ -357,7 +369,7 @@ type FlashcardDeckToCopier struct {
 type FlashcardDeckToEditor struct {
 	ID     int32
 	DeckID int32
-	UserID int32
+	UserID string
 }
 
 type Lesson struct {
@@ -429,6 +441,11 @@ type QuestionItemScore struct {
 	Score          int32
 	Percentage     int32
 	QuestionItemID int32
+}
+
+type ReviewGenerated struct {
+	ID   int32
+	Date int64
 }
 
 type SingleChoiceAnswer struct {

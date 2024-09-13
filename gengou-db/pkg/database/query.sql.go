@@ -19,7 +19,8 @@ INSERT INTO "FlashcardDeck" (
     graduating_interval,
     learning_steps,
     new_cards_limit_per_day,
-    easy_interval
+    easy_interval,
+    learning_step_no
 )
 SELECT
     title,
@@ -27,7 +28,8 @@ SELECT
     graduating_interval,
     learning_steps,
     new_cards_limit_per_day,
-    easy_interval
+    easy_interval,
+    learning_step_no
 FROM "FlashcardDeck" AS old_deck
 WHERE old_deck.id = $1
     RETURNING id AS new_deck_id
@@ -46,41 +48,41 @@ const copyFlashcardsForDeck = `-- name: CopyFlashcardsForDeck :many
 WITH CopiedFlashcards AS (
 INSERT INTO "Flashcard" (
     front_side, rear_side, front_audio, rear_audio, front_image, rear_image,
-    review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
+    review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
 )
 SELECT
     front_side, rear_side, front_audio, rear_audio, front_image, rear_image,
-    review_factor, review_interval, due_date, unreviewed_priority_num, $2  -- new deck ID
+    review_factor, review_interval, due_date, is_new, learning_step_no, $2  -- new deck ID
 FROM "Flashcard" AS old_flashcard
 WHERE old_flashcard.deck_id = $1  -- old deck ID
     RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image,
-              review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
+              review_factor, review_interval, due_date, is_new, deck_id
 )
-SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id FROM CopiedFlashcards
+SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id FROM CopiedFlashcards
 `
 
 type CopyFlashcardsForDeckParams struct {
-	DeckID   int32
-	DeckID_2 int32
+	DeckID         int32
+	LearningStepNo int32
 }
 
 type CopyFlashcardsForDeckRow struct {
-	ID                    int32
-	FrontSide             string
-	RearSide              string
-	FrontAudio            pgtype.Text
-	RearAudio             pgtype.Text
-	FrontImage            pgtype.Text
-	RearImage             pgtype.Text
-	ReviewFactor          int32
-	ReviewInterval        int32
-	DueDate               pgtype.Timestamp
-	UnreviewedPriorityNum int32
-	DeckID                int32
+	ID             int32
+	FrontSide      string
+	RearSide       string
+	FrontAudio     pgtype.Text
+	RearAudio      pgtype.Text
+	FrontImage     pgtype.Text
+	RearImage      pgtype.Text
+	ReviewFactor   int32
+	ReviewInterval int32
+	DueDate        int64
+	IsNew          bool
+	DeckID         int32
 }
 
 func (q *Queries) CopyFlashcardsForDeck(ctx context.Context, arg CopyFlashcardsForDeckParams) ([]CopyFlashcardsForDeckRow, error) {
-	rows, err := q.db.Query(ctx, copyFlashcardsForDeck, arg.DeckID, arg.DeckID_2)
+	rows, err := q.db.Query(ctx, copyFlashcardsForDeck, arg.DeckID, arg.LearningStepNo)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +101,7 @@ func (q *Queries) CopyFlashcardsForDeck(ctx context.Context, arg CopyFlashcardsF
 			&i.ReviewFactor,
 			&i.ReviewInterval,
 			&i.DueDate,
-			&i.UnreviewedPriorityNum,
+			&i.IsNew,
 			&i.DeckID,
 		); err != nil {
 			return nil, err
@@ -137,20 +139,24 @@ func (q *Queries) CreateCopyFlashcardDecKMapping(ctx context.Context, arg Create
 
 const createFlashcard = `-- name: CreateFlashcard :one
 INSERT INTO "Flashcard" (
-                         front_side, rear_side, deck_id, review_factor, review_interval, due_date, unreviewed_priority_num
+                             front_side, rear_side, deck_id, review_factor, review_interval, due_date, is_new, front_audio, rear_audio, front_image, rear_image, learning_step_no
 ) VALUES (
-          $1,$2, $3, $4, $5, $6, $7
-         ) RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
+          $1,$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0
+         ) RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
 `
 
 type CreateFlashcardParams struct {
-	FrontSide             string
-	RearSide              string
-	DeckID                int32
-	ReviewFactor          int32
-	ReviewInterval        int32
-	DueDate               pgtype.Timestamp
-	UnreviewedPriorityNum int32
+	FrontSide      string
+	RearSide       string
+	DeckID         int32
+	ReviewFactor   int32
+	ReviewInterval int32
+	DueDate        int64
+	IsNew          bool
+	FrontAudio     pgtype.Text
+	RearAudio      pgtype.Text
+	FrontImage     pgtype.Text
+	RearImage      pgtype.Text
 }
 
 func (q *Queries) CreateFlashcard(ctx context.Context, arg CreateFlashcardParams) (Flashcard, error) {
@@ -161,7 +167,11 @@ func (q *Queries) CreateFlashcard(ctx context.Context, arg CreateFlashcardParams
 		arg.ReviewFactor,
 		arg.ReviewInterval,
 		arg.DueDate,
-		arg.UnreviewedPriorityNum,
+		arg.IsNew,
+		arg.FrontAudio,
+		arg.RearAudio,
+		arg.FrontImage,
+		arg.RearImage,
 	)
 	var i Flashcard
 	err := row.Scan(
@@ -175,16 +185,17 @@ func (q *Queries) CreateFlashcard(ctx context.Context, arg CreateFlashcardParams
 		&i.ReviewFactor,
 		&i.ReviewInterval,
 		&i.DueDate,
-		&i.UnreviewedPriorityNum,
+		&i.IsNew,
 		&i.DeckID,
+		&i.LearningStepNo,
 	)
 	return i, err
 }
 
 const createFlashcardDeck = `-- name: CreateFlashcardDeck :one
 WITH new_deck AS (
-INSERT INTO "FlashcardDeck" (title)
-VALUES ($1)
+INSERT INTO "FlashcardDeck" (title,max_review_limit_per_day,graduating_interval,learning_steps,new_cards_limit_per_day,easy_interval)
+VALUES ($1,$3,$4,$5,$6,$7)
     RETURNING id
     )
 INSERT INTO "FlashcardDeckToEditors" (deck_id, user_id)
@@ -193,14 +204,86 @@ FROM new_deck RETURNING id, deck_id, user_id
 `
 
 type CreateFlashcardDeckParams struct {
-	Title  string
-	UserID int32
+	Title                string
+	UserID               string
+	MaxReviewLimitPerDay int32
+	GraduatingInterval   int32
+	LearningSteps        string
+	NewCardsLimitPerDay  int32
+	EasyInterval         int32
 }
 
 func (q *Queries) CreateFlashcardDeck(ctx context.Context, arg CreateFlashcardDeckParams) (FlashcardDeckToEditor, error) {
-	row := q.db.QueryRow(ctx, createFlashcardDeck, arg.Title, arg.UserID)
+	row := q.db.QueryRow(ctx, createFlashcardDeck,
+		arg.Title,
+		arg.UserID,
+		arg.MaxReviewLimitPerDay,
+		arg.GraduatingInterval,
+		arg.LearningSteps,
+		arg.NewCardsLimitPerDay,
+		arg.EasyInterval,
+	)
 	var i FlashcardDeckToEditor
 	err := row.Scan(&i.ID, &i.DeckID, &i.UserID)
+	return i, err
+}
+
+const createFlashcardReview = `-- name: CreateFlashcardReview :one
+INSERT INTO "DailyCardReviews" (  "card_id" ,
+                                  "deck_id",
+                                  "old_learning_step_no",
+                                  "old_is_new",
+                                  "old_due_date",
+                                  "is_review_complete", "review_id")
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, card_id, deck_id, review_id, old_learning_step_no, old_is_new, is_review_complete, old_due_date
+`
+
+type CreateFlashcardReviewParams struct {
+	CardID            int32
+	DeckID            int32
+	OldLearningStepNo int32
+	OldIsNew          bool
+	OldDueDate        int64
+	IsReviewComplete  bool
+	ReviewID          int32
+}
+
+func (q *Queries) CreateFlashcardReview(ctx context.Context, arg CreateFlashcardReviewParams) (DailyCardReview, error) {
+	row := q.db.QueryRow(ctx, createFlashcardReview,
+		arg.CardID,
+		arg.DeckID,
+		arg.OldLearningStepNo,
+		arg.OldIsNew,
+		arg.OldDueDate,
+		arg.IsReviewComplete,
+		arg.ReviewID,
+	)
+	var i DailyCardReview
+	err := row.Scan(
+		&i.ID,
+		&i.CardID,
+		&i.DeckID,
+		&i.ReviewID,
+		&i.OldLearningStepNo,
+		&i.OldIsNew,
+		&i.IsReviewComplete,
+		&i.OldDueDate,
+	)
+	return i, err
+}
+
+const createReviewGenerated = `-- name: CreateReviewGenerated :one
+INSERT INTO "ReviewGenerated" (
+    date
+) VALUES (
+             $1
+         ) RETURNING id, date
+`
+
+func (q *Queries) CreateReviewGenerated(ctx context.Context, date int64) (ReviewGenerated, error) {
+	row := q.db.QueryRow(ctx, createReviewGenerated, date)
+	var i ReviewGenerated
+	err := row.Scan(&i.ID, &i.Date)
 	return i, err
 }
 
@@ -216,16 +299,16 @@ func (q *Queries) DeleteUser(ctx context.Context, userID string) error {
 
 const flashcardReview = `-- name: FlashcardReview :one
 UPDATE "Flashcard"
-SET review_factor = $2, review_interval = $3, due_date = $4, unreviewed_priority_num = $5
-WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
+SET review_factor = $2, review_interval = $3, due_date = $4, is_new = $5
+WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
 `
 
 type FlashcardReviewParams struct {
-	ID                    int32
-	ReviewFactor          int32
-	ReviewInterval        int32
-	DueDate               pgtype.Timestamp
-	UnreviewedPriorityNum int32
+	ID             int32
+	ReviewFactor   int32
+	ReviewInterval int32
+	DueDate        int64
+	IsNew          bool
 }
 
 func (q *Queries) FlashcardReview(ctx context.Context, arg FlashcardReviewParams) (Flashcard, error) {
@@ -234,7 +317,7 @@ func (q *Queries) FlashcardReview(ctx context.Context, arg FlashcardReviewParams
 		arg.ReviewFactor,
 		arg.ReviewInterval,
 		arg.DueDate,
-		arg.UnreviewedPriorityNum,
+		arg.IsNew,
 	)
 	var i Flashcard
 	err := row.Scan(
@@ -248,14 +331,15 @@ func (q *Queries) FlashcardReview(ctx context.Context, arg FlashcardReviewParams
 		&i.ReviewFactor,
 		&i.ReviewInterval,
 		&i.DueDate,
-		&i.UnreviewedPriorityNum,
+		&i.IsNew,
 		&i.DeckID,
+		&i.LearningStepNo,
 	)
 	return i, err
 }
 
 const getAFlashcard = `-- name: GetAFlashcard :many
-SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
+SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
 FROM "Flashcard"
 WHERE deck_id = $1
 LIMIT $2
@@ -288,8 +372,9 @@ func (q *Queries) GetAFlashcard(ctx context.Context, arg GetAFlashcardParams) ([
 			&i.ReviewFactor,
 			&i.ReviewInterval,
 			&i.DueDate,
-			&i.UnreviewedPriorityNum,
+			&i.IsNew,
 			&i.DeckID,
+			&i.LearningStepNo,
 		); err != nil {
 			return nil, err
 		}
@@ -299,6 +384,25 @@ func (q *Queries) GetAFlashcard(ctx context.Context, arg GetAFlashcardParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const getAFlashcardDeck = `-- name: GetAFlashcardDeck :one
+    SELECT id, title, max_review_limit_per_day, graduating_interval, learning_steps, new_cards_limit_per_day, easy_interval FROM "FlashcardDeck" WHERE id = $1
+`
+
+func (q *Queries) GetAFlashcardDeck(ctx context.Context, id int32) (FlashcardDeck, error) {
+	row := q.db.QueryRow(ctx, getAFlashcardDeck, id)
+	var i FlashcardDeck
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.MaxReviewLimitPerDay,
+		&i.GraduatingInterval,
+		&i.LearningSteps,
+		&i.NewCardsLimitPerDay,
+		&i.EasyInterval,
+	)
+	return i, err
 }
 
 const getAUseWithId = `-- name: GetAUseWithId :one
@@ -356,7 +460,7 @@ func (q *Queries) GetAUserWithUserId(ctx context.Context, userID string) (User, 
 }
 
 const getAllFlashcards = `-- name: GetAllFlashcards :many
-SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
+SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
 FROM "Flashcard"
 WHERE deck_id = $1
 LIMIT $2
@@ -389,8 +493,9 @@ func (q *Queries) GetAllFlashcards(ctx context.Context, arg GetAllFlashcardsPara
 			&i.ReviewFactor,
 			&i.ReviewInterval,
 			&i.DueDate,
-			&i.UnreviewedPriorityNum,
+			&i.IsNew,
 			&i.DeckID,
+			&i.LearningStepNo,
 		); err != nil {
 			return nil, err
 		}
@@ -416,7 +521,7 @@ OFFSET $3
 `
 
 type GetFlashcardDecksParams struct {
-	UserID int32
+	UserID string
 	Limit  int32
 	Offset int32
 }
@@ -438,6 +543,163 @@ func (q *Queries) GetFlashcardDecks(ctx context.Context, arg GetFlashcardDecksPa
 			&i.LearningSteps,
 			&i.NewCardsLimitPerDay,
 			&i.EasyInterval,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getGraduateFlashcard = `-- name: GetGraduateFlashcard :many
+SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
+FROM "Flashcard"
+WHERE deck_id = $1
+  AND is_new = true
+    AND learning_step_no > 0
+    LIMIT $2
+OFFSET $3
+`
+
+type GetGraduateFlashcardParams struct {
+	DeckID int32
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) GetGraduateFlashcard(ctx context.Context, arg GetGraduateFlashcardParams) ([]Flashcard, error) {
+	rows, err := q.db.Query(ctx, getGraduateFlashcard, arg.DeckID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Flashcard
+	for rows.Next() {
+		var i Flashcard
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrontSide,
+			&i.RearSide,
+			&i.FrontAudio,
+			&i.RearAudio,
+			&i.FrontImage,
+			&i.RearImage,
+			&i.ReviewFactor,
+			&i.ReviewInterval,
+			&i.DueDate,
+			&i.IsNew,
+			&i.DeckID,
+			&i.LearningStepNo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getNewFlashcard = `-- name: GetNewFlashcard :many
+SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
+FROM "Flashcard"
+WHERE deck_id = $1
+AND is_new = true
+    AND learning_step_no = 0
+LIMIT $2
+OFFSET $3
+`
+
+type GetNewFlashcardParams struct {
+	DeckID int32
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) GetNewFlashcard(ctx context.Context, arg GetNewFlashcardParams) ([]Flashcard, error) {
+	rows, err := q.db.Query(ctx, getNewFlashcard, arg.DeckID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Flashcard
+	for rows.Next() {
+		var i Flashcard
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrontSide,
+			&i.RearSide,
+			&i.FrontAudio,
+			&i.RearAudio,
+			&i.FrontImage,
+			&i.RearImage,
+			&i.ReviewFactor,
+			&i.ReviewInterval,
+			&i.DueDate,
+			&i.IsNew,
+			&i.DeckID,
+			&i.LearningStepNo,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getReviewFlashcard = `-- name: GetReviewFlashcard :many
+SELECT id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
+FROM "Flashcard"
+WHERE deck_id = $1
+  AND is_new = false
+  AND due_date <= $2
+    AND learning_step_no = -1
+    LIMIT $3
+OFFSET $4
+`
+
+type GetReviewFlashcardParams struct {
+	DeckID  int32
+	DueDate int64
+	Limit   int32
+	Offset  int32
+}
+
+func (q *Queries) GetReviewFlashcard(ctx context.Context, arg GetReviewFlashcardParams) ([]Flashcard, error) {
+	rows, err := q.db.Query(ctx, getReviewFlashcard,
+		arg.DeckID,
+		arg.DueDate,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Flashcard
+	for rows.Next() {
+		var i Flashcard
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrontSide,
+			&i.RearSide,
+			&i.FrontAudio,
+			&i.RearAudio,
+			&i.FrontImage,
+			&i.RearImage,
+			&i.ReviewFactor,
+			&i.ReviewInterval,
+			&i.DueDate,
+			&i.IsNew,
+			&i.DeckID,
+			&i.LearningStepNo,
 		); err != nil {
 			return nil, err
 		}
@@ -575,50 +837,42 @@ func (q *Queries) InsertLearner(ctx context.Context, arg InsertLearnerParams) (U
 	return i, err
 }
 
-const updateFlashcardFrontAudio = `-- name: UpdateFlashcardFrontAudio :one
+const updateFlashcard = `-- name: UpdateFlashcard :one
 UPDATE "Flashcard"
-SET front_audio = $2
-WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
+SET front_side = $2, rear_side = $3, front_audio = $4, rear_audio = $5,  front_image = $6, rear_image = $7, review_factor = $8, review_interval = $9, is_new = $10, due_date = $11, learning_step_no = $12
+WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, is_new, deck_id, learning_step_no
 `
 
-type UpdateFlashcardFrontAudioParams struct {
-	ID         int32
-	FrontAudio pgtype.Text
+type UpdateFlashcardParams struct {
+	ID             int32
+	FrontSide      string
+	RearSide       string
+	FrontAudio     pgtype.Text
+	RearAudio      pgtype.Text
+	FrontImage     pgtype.Text
+	RearImage      pgtype.Text
+	ReviewFactor   int32
+	ReviewInterval int32
+	IsNew          bool
+	DueDate        int64
+	LearningStepNo int32
 }
 
-func (q *Queries) UpdateFlashcardFrontAudio(ctx context.Context, arg UpdateFlashcardFrontAudioParams) (Flashcard, error) {
-	row := q.db.QueryRow(ctx, updateFlashcardFrontAudio, arg.ID, arg.FrontAudio)
-	var i Flashcard
-	err := row.Scan(
-		&i.ID,
-		&i.FrontSide,
-		&i.RearSide,
-		&i.FrontAudio,
-		&i.RearAudio,
-		&i.FrontImage,
-		&i.RearImage,
-		&i.ReviewFactor,
-		&i.ReviewInterval,
-		&i.DueDate,
-		&i.UnreviewedPriorityNum,
-		&i.DeckID,
+func (q *Queries) UpdateFlashcard(ctx context.Context, arg UpdateFlashcardParams) (Flashcard, error) {
+	row := q.db.QueryRow(ctx, updateFlashcard,
+		arg.ID,
+		arg.FrontSide,
+		arg.RearSide,
+		arg.FrontAudio,
+		arg.RearAudio,
+		arg.FrontImage,
+		arg.RearImage,
+		arg.ReviewFactor,
+		arg.ReviewInterval,
+		arg.IsNew,
+		arg.DueDate,
+		arg.LearningStepNo,
 	)
-	return i, err
-}
-
-const updateFlashcardFrontImage = `-- name: UpdateFlashcardFrontImage :one
-UPDATE "Flashcard"
-SET front_image = $2
-WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
-`
-
-type UpdateFlashcardFrontImageParams struct {
-	ID         int32
-	FrontImage pgtype.Text
-}
-
-func (q *Queries) UpdateFlashcardFrontImage(ctx context.Context, arg UpdateFlashcardFrontImageParams) (Flashcard, error) {
-	row := q.db.QueryRow(ctx, updateFlashcardFrontImage, arg.ID, arg.FrontImage)
 	var i Flashcard
 	err := row.Scan(
 		&i.ID,
@@ -631,133 +885,9 @@ func (q *Queries) UpdateFlashcardFrontImage(ctx context.Context, arg UpdateFlash
 		&i.ReviewFactor,
 		&i.ReviewInterval,
 		&i.DueDate,
-		&i.UnreviewedPriorityNum,
+		&i.IsNew,
 		&i.DeckID,
-	)
-	return i, err
-}
-
-const updateFlashcardFrontSide = `-- name: UpdateFlashcardFrontSide :one
-UPDATE "Flashcard"
-SET front_side = $2
-WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
-`
-
-type UpdateFlashcardFrontSideParams struct {
-	ID        int32
-	FrontSide string
-}
-
-func (q *Queries) UpdateFlashcardFrontSide(ctx context.Context, arg UpdateFlashcardFrontSideParams) (Flashcard, error) {
-	row := q.db.QueryRow(ctx, updateFlashcardFrontSide, arg.ID, arg.FrontSide)
-	var i Flashcard
-	err := row.Scan(
-		&i.ID,
-		&i.FrontSide,
-		&i.RearSide,
-		&i.FrontAudio,
-		&i.RearAudio,
-		&i.FrontImage,
-		&i.RearImage,
-		&i.ReviewFactor,
-		&i.ReviewInterval,
-		&i.DueDate,
-		&i.UnreviewedPriorityNum,
-		&i.DeckID,
-	)
-	return i, err
-}
-
-const updateFlashcardRearAudio = `-- name: UpdateFlashcardRearAudio :one
-UPDATE "Flashcard"
-SET rear_audio = $2
-WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
-`
-
-type UpdateFlashcardRearAudioParams struct {
-	ID        int32
-	RearAudio pgtype.Text
-}
-
-func (q *Queries) UpdateFlashcardRearAudio(ctx context.Context, arg UpdateFlashcardRearAudioParams) (Flashcard, error) {
-	row := q.db.QueryRow(ctx, updateFlashcardRearAudio, arg.ID, arg.RearAudio)
-	var i Flashcard
-	err := row.Scan(
-		&i.ID,
-		&i.FrontSide,
-		&i.RearSide,
-		&i.FrontAudio,
-		&i.RearAudio,
-		&i.FrontImage,
-		&i.RearImage,
-		&i.ReviewFactor,
-		&i.ReviewInterval,
-		&i.DueDate,
-		&i.UnreviewedPriorityNum,
-		&i.DeckID,
-	)
-	return i, err
-}
-
-const updateFlashcardRearImage = `-- name: UpdateFlashcardRearImage :one
-UPDATE "Flashcard"
-SET rear_image = $2
-WHERE id = $1
-RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
-`
-
-type UpdateFlashcardRearImageParams struct {
-	ID        int32
-	RearImage pgtype.Text
-}
-
-func (q *Queries) UpdateFlashcardRearImage(ctx context.Context, arg UpdateFlashcardRearImageParams) (Flashcard, error) {
-	row := q.db.QueryRow(ctx, updateFlashcardRearImage, arg.ID, arg.RearImage)
-	var i Flashcard
-	err := row.Scan(
-		&i.ID,
-		&i.FrontSide,
-		&i.RearSide,
-		&i.FrontAudio,
-		&i.RearAudio,
-		&i.FrontImage,
-		&i.RearImage,
-		&i.ReviewFactor,
-		&i.ReviewInterval,
-		&i.DueDate,
-		&i.UnreviewedPriorityNum,
-		&i.DeckID,
-	)
-	return i, err
-}
-
-const updateFlashcardRearSide = `-- name: UpdateFlashcardRearSide :one
-UPDATE "Flashcard"
-SET rear_side = $2
-WHERE id = $1 RETURNING id, front_side, rear_side, front_audio, rear_audio, front_image, rear_image, review_factor, review_interval, due_date, unreviewed_priority_num, deck_id
-`
-
-type UpdateFlashcardRearSideParams struct {
-	ID       int32
-	RearSide string
-}
-
-func (q *Queries) UpdateFlashcardRearSide(ctx context.Context, arg UpdateFlashcardRearSideParams) (Flashcard, error) {
-	row := q.db.QueryRow(ctx, updateFlashcardRearSide, arg.ID, arg.RearSide)
-	var i Flashcard
-	err := row.Scan(
-		&i.ID,
-		&i.FrontSide,
-		&i.RearSide,
-		&i.FrontAudio,
-		&i.RearAudio,
-		&i.FrontImage,
-		&i.RearImage,
-		&i.ReviewFactor,
-		&i.ReviewInterval,
-		&i.DueDate,
-		&i.UnreviewedPriorityNum,
-		&i.DeckID,
+		&i.LearningStepNo,
 	)
 	return i, err
 }

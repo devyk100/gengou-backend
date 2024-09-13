@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"gengou-main-backend/internals/api"
 	"gengou-main-backend/internals/auth"
 	"gengou-main-backend/internals/database"
 	"gengou-main-backend/internals/redis"
@@ -17,6 +18,7 @@ func main() {
 	err := godotenv.Load(".env")
 	database.DbInit()
 	redis.RedisInit()
+	api.InitPresigner()
 	defer func() {
 		database.DbClose()
 		redis.RedisClose()
@@ -51,6 +53,8 @@ func main() {
 			return
 		}
 	})
+	r.Mount("/flashcard", api.FlashcardApiRouter())
+	r.Mount("/presign", api.PresignerApiRouter())
 	err = http.ListenAndServe(":8080", r)
 	if err != nil {
 		log.Fatal(err.Error())
